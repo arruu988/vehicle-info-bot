@@ -20,12 +20,9 @@ def keep_alive():
     t = Thread(target=run)
     t.start()
 
-BOT_TOKEN = "8595327549:AAF3-n6xjK_hBMKj6pW2cjlhmFO6oVsZWnY"
+BOT_TOKEN = "8595327549:AAG6164KjUp5Rof0UVuYUj04IQvnetkOFLM"
 
-logging.basicConfig(
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_vehicle_info(vehicle_no, retries=10):
@@ -49,6 +46,7 @@ def format_vehicle_info(data):
         return "❌ Vehicle details nahi mil sake. Vehicle number check karo."
 
     text = "🚗 VEHICLE INFORMATION 🚗\n\n"
+    # EMOJI MAPPING FOR ALL POSSIBLE FIELDS
     field_emojis = {
         'owner_name': '👤',
         'vehicle_type': '🚙', 
@@ -104,8 +102,10 @@ def format_vehicle_info(data):
     }
     
     for key, value in data.items():
+        # AGAR "POWERED BY" FIELD HAI TOH USME APNA USERNAME DALDO
         if key.lower() == 'powered by' or key.lower() == 'powered_by':
             text += f"⚡ Powered By: @maarjauky\n"
+        # AGAR "RATE LIMIT" FIELD HAI TOH USE SKIP KARDO
         elif key.lower() == 'rate limit' or key.lower() == 'rate_limit':
             continue
         else:
@@ -160,27 +160,4 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     print("🚀 Starting Vehicle Info Bot...")
     print("Free limit: 6 searches/day")
-    print("Premium: Unlimited")
-    print("Prices: 150/month, 1200/6months, 1350/year")
-    print("Admin User IDs: 8472134840, 1199617785")
-    print("Bot by amacrjauky")
-
-    try:
-        # YEH LINE CORRECT HAI - Application builder use karo
-        application = Application.builder().token(BOT_TOKEN).build()
-        
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        application.add_error_handler(error_handler)
-        
-        print("✅ Bot running! Press Ctrl+C to stop.")
-        
-        # YEH LINE IMPORTANT HAI - poll() method use karo run_polling() ki jagah
-        application.run_polling()
-        
-    except Exception as e:
-        print(f"❌ Error: {e}")
-
-if __name__ == "__main__":
-    keep_alive()
-    main()
+    print("Premi...
