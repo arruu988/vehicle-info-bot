@@ -6,7 +6,7 @@ from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN = os.getenv("8595327549:AAG6164KjUp5Rof0UVuYUj04IQvnetkOFLM")
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(name)
@@ -76,4 +76,5 @@ def main():
     bot.run_polling()
 
 if name == "main":
+
     main()
