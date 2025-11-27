@@ -4,25 +4,40 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from flask import Flask
+from threading import Thread
+
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "🤖 Vehicle Bot is Running!"
+
+def run():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = Thread(target=run)
+    t.start()
 
 BOT_TOKEN = "8595327549:AAG6164KjUp5Rof0UVuYUj04IQvnetkOFLM"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def get_vehicle_info(vehicle_no, retries=3):
+def get_vehicle_info(vehicle_no, retries=10):
     url = f"https://vehicleinfotrial.hackathonjce001.workers.dev/?VIN={vehicle_no}"
     headers = {"User-Agent": "Mozilla/5.0"}
     for attempt in range(1, retries + 1):
         try:
             logger.info(f"Attempt {attempt}/{retries} for VIN: {vehicle_no}")
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(url, headers=headers, timeout=15)
             response.raise_for_status()
             data = response.json()
             return data
         except Exception as e:
             logger.warning(f"Attempt {attempt} failed: {e}")
-            time.sleep(1)
+            time.sleep(2)
     return None
 
 def format_vehicle_info(data):
@@ -86,12 +101,12 @@ def main():
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_error_handler(error_handler)
-        
         print("✅ Bot running! Press Ctrl+C to stop.")
-        application.run_polling(drop_pending_updates=True)
-        
+        application.run_polling()
     except Exception as e:
         print(f"❌ Error: {e}")
 
 if __name__ == "__main__":
+    keep_alive()
     main()
+
