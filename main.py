@@ -4,34 +4,27 @@ import logging
 import os
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-from flask import Flask
-from threading import Thread
-app = Flask('')
-@app.route('/')
-def home():
-    return "🤖 Vehicle Bot is Running!"
-def run():
-    app.run(host='0.0.0.0', port=8080)
-def keep_alive():
-    t = Thread(target=run)
-    t.start()
+
 BOT_TOKEN = "8595327549:AAG6164KjUp5Rof0UVuYUj04IQvnetkOFLM"
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-def get_vehicle_info(vehicle_no, retries=10):
+
+def get_vehicle_info(vehicle_no, retries=3):
     url = f"https://vehicleinfotrial.hackathonjce001.workers.dev/?VIN={vehicle_no}"
     headers = {"User-Agent": "Mozilla/5.0"}
     for attempt in range(1, retries + 1):
         try:
             logger.info(f"Attempt {attempt}/{retries} for VIN: {vehicle_no}")
-            response = requests.get(url, headers=headers, timeout=15)
+            response = requests.get(url, headers=headers, timeout=10)
             response.raise_for_status()
             data = response.json()
             return data
         except Exception as e:
             logger.warning(f"Attempt {attempt} failed: {e}")
-            time.sleep(2)
+            time.sleep(1)
     return None
+
 def format_vehicle_info(data):
     if not data:
         return "❌ Vehicle details nahi mil sake. Vehicle number check karo."
@@ -50,6 +43,7 @@ def format_vehicle_info(data):
             text += f"{emoji} {display_name}: {value}\n"
     text += "\n🤖 Powered by @maarjauky"
     return text
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     welcome = f"""Namaste {user.first_name}! 👋
@@ -61,6 +55,7 @@ Mujhe kisi bhi vehicle ka number/VIN do, main details dunga!
 • 1HGBH41JXMN109186
 Apna vehicle number try karo! 🚙"""
     await update.message.reply_text(welcome)
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     vehicle_no = update.message.text.strip()
     if len(vehicle_no) < 3:
@@ -75,8 +70,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("😔 Sorry! Details nahi mil sake.\n\nKoshish karo:\n• Different number try karo\n• Thodi der baad try karo")
     await msg.delete()
+
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Error: {context.error}")
+
 def main():
     print("🚀 Starting Vehicle Info Bot...")
     print("Free limit: 6 searches/day")
@@ -89,10 +86,12 @@ def main():
         application.add_handler(CommandHandler("start", start))
         application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         application.add_error_handler(error_handler)
+        
         print("✅ Bot running! Press Ctrl+C to stop.")
-        application.run_polling()
+        application.run_polling(drop_pending_updates=True)
+        
     except Exception as e:
         print(f"❌ Error: {e}")
+
 if __name__ == "__main__":
-    keep_alive()
     main()
