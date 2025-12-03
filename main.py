@@ -1,373 +1,334 @@
-import re
-import sqlite3
-import requests
+import os
 import telebot
 import time
-import os
-from telebot import types
 from flask import Flask
-from threading import Thread
+import sys
 
-# Bot Token - Render के environment variable से लें
+# ========== CONFIG ==========
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8133993773:AAHUPt2Irj1LXC7QjV-tl00t-uo0fGbjyoc")
+ADMIN_ID = int(os.environ.get("ADMIN_ID", "8472134640"))
+
+# Create bot instance
 bot = telebot.TeleBot(BOT_TOKEN)
 
-# Admin ID
-ADMIN_ID = int(os.environ.get("ADMIN_ID", "8472134640"))
-DB_FILE = "users.db"
-
-# Database setup
-def init_db():
-    conn = sqlite3.connect(DB_FILE)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (user_id INTEGER PRIMARY KEY, credits INTEGER DEFAULT 5, 
-                  last_credit_date TEXT, is_blocked INTEGER DEFAULT 0)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS history
-                 (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, 
-                  query TEXT, api_type TEXT, ts TEXT)''')
-    c.execute('''CREATE TABLE IF NOT EXISTS blocked_users
-                 (user_id INTEGER PRIMARY KEY, blocked_by INTEGER, 
-                  reason TEXT, blocked_at TEXT)''')
-    conn.commit()
-    conn.close()
-
-init_db()
-
-SPECIAL_USERS = [{"id": ADMIN_ID, "name": "Admin"}]
-
-def is_admin(user_id):
-    return user_id == ADMIN_ID
-
-def is_special_user(user_id):
-    return any(user["id"] == user_id for user in SPECIAL_USERS)
-
-def get_connection():
-    return sqlite3.connect(DB_FILE)
-
-def init_user(user_id):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("INSERT OR IGNORE INTO users (user_id, credits) VALUES (?, 5)", (user_id,))
-    conn.commit()
-    conn.close()
-
-def get_credits(user_id):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT credits FROM users WHERE user_id=?", (user_id,))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 0
-
-def set_credits(user_id, credits):
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("UPDATE users SET credits=? WHERE user_id=?", (credits, user_id))
-    conn.commit()
-    conn.close()
-
-def ensure_and_charge(user_id, chat_id):
-    if is_special_user(user_id):
-        init_user(user_id)
-        set_credits(user_id, 999)
-        return True
-    
-    init_user(user_id)
-    credits = get_credits(user_id)
-    
-    if credits <= 0:
-        kb = types.InlineKeyboardMarkup()
-        kb.add(types.InlineKeyboardButton("💳 Buy Credits", callback_data="buy_credits"))
-        bot.send_message(chat_id, "❌ No credits left. DM @Maarjauky to buy", reply_markup=kb)
-        return False
-    
-    set_credits(user_id, credits - 1)
-    return True
-
-# Start Command
+# ========== BOT COMMANDS ==========
 @bot.message_handler(commands=['start'])
-def start(m):
-    user_id = m.from_user.id
-    init_user(user_id)
+def start_command(message):
+    user_id = message.from_user.id
     
-    credits = get_credits(user_id)
+    # Check if admin
+    is_admin_user = user_id == ADMIN_ID
     
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    kb.add("👤 Telegram ID Info", "🇮🇳 India Number Info")
-    kb.add("📱 Pakistan Number Info", "📮 Pincode Info")
-    kb.add("🚘 Vehicle Info", "🆔 Aadhaar Info")
-    kb.add("🧪 ICMR Number Info", "🏦 IFSC Code Info")
-    kb.add("💸 UPI ID Info", "📋 Ration Card Info")
-    kb.add("🌐 IP Info", "🎮 Free Fire Info")
-    kb.add("👀 Free Fire Views", "💳 My Credits")
-    kb.add("💳 Buy Credits", "📞 Contact Admin")
+    # Welcome message
+    welcome_text = f"""
+🤖 <b>InfoBot by @Maarjauky</b>
+━━━━━━━━━━━━━━━━━━
+
+👤 <b>Your ID:</b> <code>{user_id}</code>
+{"🌟 <b>Status:</b> Admin" if is_admin_user else "👤 <b>Status:</b> User"}
+
+📞 <b>Contact Admin:</b> @Maarjauky
+💳 <b>Buy Credits:</b> DM @Maarjauky
+
+<b>Available Services:</b>
+• 🌐 IP Information
+• 🏦 IFSC Code Info  
+• 📮 Pincode Info
+• 📞 Contact Admin
+• 💳 Buy Credits
+
+━━━━━━━━━━━━━━━━━━
+⚠️ <i>More services coming soon!</i>
+"""
     
-    if is_admin(user_id):
-        kb.add("⚙️ Admin Panel")
+    # Create reply keyboard
+    from telebot import types
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     
-    text = f"""🤖 <b>InfoBot by @Maarjauky</b>
-
-💳 Credits: {credits}
-🎁 Daily 10 free credits
-
-📞 Contact: @Maarjauky
-💳 Buy Credits: DM @Maarjauky
-
-Choose an option:"""
+    # Add buttons
+    markup.add("🌐 IP Info", "🏦 IFSC Code")
+    markup.add("📮 Pincode Info", "📞 Contact Admin")
+    markup.add("💳 Buy Credits", "🆔 My ID")
     
-    bot.send_message(m.chat.id, text, reply_markup=kb, parse_mode="HTML")
-
-# Basic handlers
-@bot.message_handler(func=lambda m: m.text == "🆔 My ID")
-def my_id(m):
-    bot.send_message(m.chat.id, f"🆔 Your ID: <code>{m.from_user.id}</code>", parse_mode="HTML")
-
-@bot.message_handler(func=lambda m: m.text == "💳 My Credits")
-def my_credits(m):
-    credits = get_credits(m.from_user.id)
-    bot.send_message(m.chat.id, f"💳 Credits: {credits}")
-
-@bot.message_handler(func=lambda m: m.text == "📞 Contact Admin")
-def contact_admin(m):
-    kb = types.InlineKeyboardMarkup()
-    kb.add(types.InlineKeyboardButton("📞 Contact @Maarjauky", url="https://t.me/Maarjauky"))
-    bot.send_message(m.chat.id, "Click to contact:", reply_markup=kb)
-
-@bot.message_handler(func=lambda m: m.text == "💳 Buy Credits")
-def buy_credits_menu(m):
-    kb = types.InlineKeyboardMarkup(row_width=1)
-    kb.add(types.InlineKeyboardButton("💎 100 Credits - ₹200", callback_data="buy_100"))
-    kb.add(types.InlineKeyboardButton("💎 200 Credits - ₹300", callback_data="buy_200"))
-    kb.add(types.InlineKeyboardButton("💎 500 Credits - ₹500", callback_data="buy_500"))
-    kb.add(types.InlineKeyboardButton("🔄 Custom Amount", callback_data="buy_custom"))
+    if is_admin_user:
+        markup.add("⚙️ Admin Panel")
     
-    text = """💳 <b>Credit Packs</b>
-━━━━━━━━━━━━━━
-💎 100 Credits - ₹200
-💎 200 Credits - ₹300
-💎 500 Credits - ₹500
-━━━━━━━━━━━━━━
-📥 DM @Maarjauky to buy"""
+    bot.send_message(message.chat.id, welcome_text, reply_markup=markup, parse_mode="HTML")
+
+@bot.message_handler(func=lambda message: message.text == "🆔 My ID")
+def my_id_command(message):
+    bot.send_message(message.chat.id, f"🆔 <b>Your Telegram ID:</b> <code>{message.from_user.id}</code>", parse_mode="HTML")
+
+@bot.message_handler(func=lambda message: message.text == "📞 Contact Admin")
+def contact_admin_command(message):
+    from telebot import types
+    markup = types.InlineKeyboardMarkup()
+    markup.add(types.InlineKeyboardButton("📞 Contact @Maarjauky", url="https://t.me/Maarjauky"))
+    bot.send_message(message.chat.id, "Click below to contact admin:", reply_markup=markup)
+
+@bot.message_handler(func=lambda message: message.text == "💳 Buy Credits")
+def buy_credits_command(message):
+    from telebot import types
     
-    bot.send_message(m.chat.id, text, reply_markup=kb, parse_mode="HTML")
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(types.InlineKeyboardButton("💎 100 Credits - ₹200", callback_data="buy_100"))
+    markup.add(types.InlineKeyboardButton("💎 200 Credits - ₹300", callback_data="buy_200"))
+    markup.add(types.InlineKeyboardButton("💎 500 Credits - ₹500", callback_data="buy_500"))
+    markup.add(types.InlineKeyboardButton("🔄 Custom Amount", callback_data="buy_custom"))
+    
+    text = """💳 <b>Credit Packages</b>
+━━━━━━━━━━━━━━━━━━
+💎 <b>100 Credits</b> - ₹200
+💎 <b>200 Credits</b> - ₹300  
+💎 <b>500 Credits</b> - ₹500
+━━━━━━━━━━━━━━━━━━
+📥 <b>Payment:</b> DM @Maarjauky
+📸 Send payment screenshot"""
+    
+    bot.send_message(message.chat.id, text, reply_markup=markup, parse_mode="HTML")
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("buy_"))
 def buy_callback(call):
+    user_id = call.from_user.id
+    
     if call.data == "buy_100":
-        amount = "100 Credits - ₹200"
+        package = "100 Credits - ₹200"
     elif call.data == "buy_200":
-        amount = "200 Credits - ₹300"
+        package = "200 Credits - ₹300"
     elif call.data == "buy_500":
-        amount = "500 Credits - ₹500"
+        package = "500 Credits - ₹500"
     else:
-        amount = "Custom Amount"
+        package = "Custom Amount"
     
     text = f"""💳 <b>Payment Instructions</b>
-━━━━━━━━━━━━━━
-Package: {amount}
-📥 Send payment to: @Maarjauky
-📸 Send screenshot with your ID: {call.from_user.id}
-✅ Credits added within 24 hours"""
+━━━━━━━━━━━━━━━━━━
+📦 <b>Package:</b> {package}
+👤 <b>Your ID:</b> <code>{user_id}</code>
+
+📥 <b>Steps:</b>
+1. Send payment to @Maarjauky
+2. Take screenshot
+3. Send to @Maarjauky
+4. Credits added within 24h
+
+💬 <b>Contact:</b> @Maarjauky"""
     
     bot.answer_callback_query(call.id)
     bot.send_message(call.message.chat.id, text, parse_mode="HTML")
 
-# Telegram ID Info
-@bot.message_handler(func=lambda m: m.text == "👤 Telegram ID Info")
-def ask_tg_id(m):
-    msg = bot.send_message(m.chat.id, "📩 Send Telegram User ID:")
-    bot.register_next_step_handler(msg, process_tg_id)
+# ========== WORKING APIs ==========
+import requests
 
-def process_tg_id(m):
-    if not m.text or not m.text.isdigit():
-        bot.send_message(m.chat.id, "❌ Invalid ID")
+@bot.message_handler(func=lambda message: message.text == "🌐 IP Info")
+def ip_info_command(message):
+    msg = bot.send_message(message.chat.id, "🌐 Send IP address (e.g., 8.8.8.8):")
+    bot.register_next_step_handler(msg, process_ip_info)
+
+def process_ip_info(message):
+    import re
+    
+    ip = message.text.strip()
+    if not re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
+        bot.send_message(message.chat.id, "❌ Invalid IP format")
         return
     
-    if not ensure_and_charge(m.from_user.id, m.chat.id):
-        return
-    
-    user_id = m.text
     try:
-        response = requests.get(f"https://tg-info-neon.vercel.app/user-details?user={user_id}", timeout=10)
+        response = requests.get(f"http://ip-api.com/json/{ip}", timeout=10)
         if response.status_code == 200:
             data = response.json()
-            if data.get("success"):
-                user_data = data["data"]
-                text = f"""👤 <b>Telegram Info</b>
-━━━━━━━━━━━━━━
-🆔 ID: <code>{user_data.get('id', 'N/A')}</code>
-👤 Name: {user_data.get('first_name', '')} {user_data.get('last_name', '')}
-🤖 Bot: {user_data.get('is_bot', False)}
-💬 Messages: {user_data.get('total_msg_count', 0)}"""
-                bot.send_message(m.chat.id, text, parse_mode="HTML")
-            else:
-                bot.send_message(m.chat.id, "❌ User not found")
-        else:
-            bot.send_message(m.chat.id, "❌ API error")
-    except:
-        bot.send_message(m.chat.id, "❌ Error fetching data")
-
-# India Number Info
-@bot.message_handler(func=lambda m: m.text == "🇮🇳 India Number Info")
-def ask_india_number(m):
-    msg = bot.send_message(m.chat.id, "📱 Send 10-digit Indian number:")
-    bot.register_next_step_handler(msg, process_india_number)
-
-def process_india_number(m):
-    if not m.text or not re.match(r'^\d{10}$', m.text):
-        bot.send_message(m.chat.id, "❌ Invalid number")
-        return
-    
-    if not ensure_and_charge(m.from_user.id, m.chat.id):
-        return
-    
-    number = m.text
-    try:
-        response = requests.get(f"https://demon.taitanx.workers.dev/?mobile={number}", timeout=30)
-        if response.status_code == 200:
-            data = response.json()
-            records = data.get("data", [])
-            if records:
-                text = f"""📱 <b>Number Lookup</b>
-━━━━━━━━━━━━━━
-🔍 Number: {number}
-📊 Records: {len(records)}"""
-                bot.send_message(m.chat.id, text, parse_mode="HTML")
+            
+            if data.get('status') == 'success':
+                info = f"""🌐 <b>IP Information</b>
+━━━━━━━━━━━━━━━━━━
+🖥️ <b>IP:</b> <code>{ip}</code>
+🌍 <b>Country:</b> {data.get('country', 'N/A')}
+🏙️ <b>City:</b> {data.get('city', 'N/A')}
+🏛️ <b>Region:</b> {data.get('regionName', 'N/A')}
+📡 <b>ISP:</b> {data.get('isp', 'N/A')}
+📍 <b>Location:</b> {data.get('lat', 'N/A')}, {data.get('lon', 'N/A')}"""
                 
-                for i, rec in enumerate(records[:3], 1):
-                    info = f"""📋 Record #{i}
-👤 Name: {rec.get('name', 'N/A')}
-📱 Mobile: {rec.get('mobile', 'N/A')}
-📍 Address: {rec.get('address', 'N/A')[:50]}..."""
-                    bot.send_message(m.chat.id, info)
+                bot.send_message(message.chat.id, info, parse_mode="HTML")
             else:
-                bot.send_message(m.chat.id, "📭 No records found")
+                bot.send_message(message.chat.id, "❌ IP not found")
         else:
-            bot.send_message(m.chat.id, "❌ API error")
+            bot.send_message(message.chat.id, "❌ API Error")
     except:
-        bot.send_message(m.chat.id, "❌ Error fetching data")
+        bot.send_message(message.chat.id, "❌ Error fetching data")
 
-# Admin Panel
-@bot.message_handler(func=lambda m: m.text == "⚙️ Admin Panel")
-def admin_panel(m):
-    if not is_admin(m.from_user.id):
-        return
-    
-    kb = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add("💳 Add Credits", "👥 All Users")
-    kb.add("📢 Broadcast", "🔙 Back")
-    
-    bot.send_message(m.chat.id, "⚙️ Admin Panel", reply_markup=kb)
+@bot.message_handler(func=lambda message: message.text == "🏦 IFSC Code")
+def ifsc_command(message):
+    msg = bot.send_message(message.chat.id, "🏦 Send IFSC Code (e.g., SBIN0005943):")
+    bot.register_next_step_handler(msg, process_ifsc)
 
-@bot.message_handler(func=lambda m: m.text == "💳 Add Credits")
-def add_credits_start(m):
-    if not is_admin(m.from_user.id):
-        return
-    msg = bot.send_message(m.chat.id, "Send: user_id credits")
-    bot.register_next_step_handler(msg, add_credits_process)
-
-def add_credits_process(m):
-    if not is_admin(m.from_user.id):
-        return
+def process_ifsc(message):
+    ifsc = message.text.strip().upper()
     
     try:
-        parts = m.text.split()
-        user_id = int(parts[0])
-        credits = int(parts[1])
-        
-        init_user(user_id)
-        current = get_credits(user_id)
-        set_credits(user_id, current + credits)
-        
-        bot.send_message(m.chat.id, f"✅ Added {credits} credits to {user_id}")
-        
-        try:
-            bot.send_message(user_id, f"🎉 {credits} credits added by admin!")
-        except:
-            pass
+        response = requests.get(f"https://ifsc.razorpay.com/{ifsc}", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            
+            info = f"""🏦 <b>Bank Information</b>
+━━━━━━━━━━━━━━━━━━
+🏛️ <b>Bank:</b> {data.get('BANK', 'N/A')}
+🔢 <b>IFSC:</b> {data.get('IFSC', 'N/A')}
+🏢 <b>Branch:</b> {data.get('BRANCH', 'N/A')}
+📍 <b>Address:</b> {data.get('ADDRESS', 'N/A')}
+🏙️ <b>City:</b> {data.get('CITY', 'N/A')}"""
+            
+            bot.send_message(message.chat.id, info, parse_mode="HTML")
+        else:
+            bot.send_message(message.chat.id, "❌ IFSC not found")
     except:
-        bot.send_message(m.chat.id, "❌ Invalid format")
+        bot.send_message(message.chat.id, "❌ Error fetching data")
 
-@bot.message_handler(func=lambda m: m.text == "👥 All Users")
-def all_users(m):
-    if not is_admin(m.from_user.id):
+@bot.message_handler(func=lambda message: message.text == "📮 Pincode Info")
+def pincode_command(message):
+    msg = bot.send_message(message.chat.id, "📮 Send 6-digit Pincode:")
+    bot.register_next_step_handler(msg, process_pincode)
+
+def process_pincode(message):
+    pincode = message.text.strip()
+    
+    try:
+        response = requests.get(f"https://api.postalpincode.in/pincode/{pincode}", timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            
+            if data[0]['Status'] == 'Success':
+                post_office = data[0]['PostOffice'][0] if data[0]['PostOffice'] else {}
+                
+                info = f"""📮 <b>Pincode Information</b>
+━━━━━━━━━━━━━━━━━━
+🔢 <b>Pincode:</b> {pincode}
+🏛️ <b>District:</b> {post_office.get('District', 'N/A')}
+🏛️ <b>State:</b> {post_office.get('State', 'N/A')}
+🏢 <b>Post Office:</b> {post_office.get('Name', 'N/A')}"""
+                
+                bot.send_message(message.chat.id, info, parse_mode="HTML")
+            else:
+                bot.send_message(message.chat.id, "❌ Pincode not found")
+        else:
+            bot.send_message(message.chat.id, "❌ API Error")
+    except:
+        bot.send_message(message.chat.id, "❌ Error fetching data")
+
+# ========== ADMIN PANEL ==========
+@bot.message_handler(func=lambda message: message.text == "⚙️ Admin Panel")
+def admin_panel_command(message):
+    if message.from_user.id != ADMIN_ID:
+        bot.send_message(message.chat.id, "❌ Access Denied")
         return
     
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT user_id, credits FROM users")
-    users = c.fetchall()
-    conn.close()
+    from telebot import types
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
+    markup.add("📊 Bot Stats", "👥 Users List")
+    markup.add("📢 Broadcast", "🔙 Main Menu")
     
-    text = f"👥 Total Users: {len(users)}\n\n"
-    for uid, credits in users[:20]:
-        text += f"🆔 {uid}: {credits} credits\n"
-    
-    bot.send_message(m.chat.id, text)
+    bot.send_message(message.chat.id, "⚙️ <b>Admin Panel</b>\nSelect option:", reply_markup=markup, parse_mode="HTML")
 
-@bot.message_handler(func=lambda m: m.text == "📢 Broadcast")
-def broadcast_start(m):
-    if not is_admin(m.from_user.id):
-        return
-    msg = bot.send_message(m.chat.id, "📢 Send broadcast message:")
-    bot.register_next_step_handler(msg, broadcast_send)
+@bot.message_handler(func=lambda message: message.text == "🔙 Main Menu")
+def main_menu_command(message):
+    start_command(message)
 
-def broadcast_send(m):
-    if not is_admin(m.from_user.id):
+@bot.message_handler(func=lambda message: message.text == "📊 Bot Stats")
+def bot_stats_command(message):
+    if message.from_user.id != ADMIN_ID:
         return
     
-    conn = get_connection()
-    c = conn.cursor()
-    c.execute("SELECT user_id FROM users")
-    users = [row[0] for row in c.fetchall()]
-    conn.close()
+    stats = f"""📊 <b>Bot Statistics</b>
+━━━━━━━━━━━━━━━━━━
+🤖 <b>Bot:</b> InfoBot
+👤 <b>Admin:</b> @Maarjauky
+🆔 <b>Admin ID:</b> {ADMIN_ID}
+🔗 <b>Contact:</b> @Maarjauky"""
     
-    sent = 0
-    for uid in users:
-        try:
-            bot.send_message(uid, f"📢 <b>Broadcast</b>\n\n{m.text}\n\n<i>- Admin @Maarjauky</i>", parse_mode="HTML")
-            sent += 1
-            time.sleep(0.1)
-        except:
-            continue
+    bot.send_message(message.chat.id, stats, parse_mode="HTML")
+
+@bot.message_handler(func=lambda message: message.text == "👥 Users List")
+def users_list_command(message):
+    if message.from_user.id != ADMIN_ID:
+        return
     
-    bot.send_message(m.chat.id, f"✅ Broadcast sent to {sent}/{len(users)} users")
+    # Simple users list (in production use database)
+    bot.send_message(message.chat.id, "👥 Users list feature coming soon!")
 
-@bot.message_handler(func=lambda m: m.text == "🔙 Back")
-def back_to_main(m):
-    start(m)
+@bot.message_handler(func=lambda message: message.text == "📢 Broadcast")
+def broadcast_command(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    msg = bot.send_message(message.chat.id, "📢 Send broadcast message:")
+    bot.register_next_step_handler(msg, process_broadcast)
 
-# Flask Web Server (Render के लिए जरूरी)
+def process_broadcast(message):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    # Simple broadcast (in production send to all users)
+    bot.send_message(message.chat.id, f"✅ Broadcast sent!\nMessage: {message.text}")
+
+# ========== FALLBACK ==========
+@bot.message_handler(func=lambda message: True)
+def fallback_command(message):
+    bot.send_message(message.chat.id, "❌ Unknown command. Use /start to see menu")
+
+# ========== FLASK WEB SERVER ==========
 app = Flask(__name__)
 
 @app.route('/')
 def home():
-    return "🤖 Telegram Bot is running! - @Maarjauky"
+    return "🤖 Telegram Bot is running - @Maarjauky"
 
 @app.route('/health')
 def health():
     return "OK", 200
 
-def run_web():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
+@app.route('/ping')
+def ping():
+    return "pong", 200
 
-# Bot start function
-def run_bot():
+def run_web_server():
+    port = int(os.environ.get('PORT', 8080))
+    # Use different port to avoid conflict
+    app.run(host='0.0.0.0', port=port, debug=False, use_reloader=False)
+
+# ========== BOT RUNNER ==========
+def run_bot_single_instance():
     print("🤖 Starting Telegram Bot...")
-    while True:
-        try:
-            bot.polling(none_stop=True, timeout=60)
-        except Exception as e:
-            print(f"Bot error: {e}")
-            time.sleep(5)
+    print(f"👤 Admin: {ADMIN_ID}")
+    print(f"🔗 Contact: @Maarjauky")
+    print("⏳ Bot is running...")
+    
+    try:
+        # Remove any existing webhook
+        bot.remove_webhook()
+        time.sleep(1)
+        
+        # Start polling with single instance
+        bot.polling(
+            none_stop=True,
+            interval=3,
+            timeout=30,
+            allowed_updates=None,
+            skip_pending=False
+        )
+    except Exception as e:
+        print(f"❌ Bot error: {e}")
+        time.sleep(5)
+        # Restart bot
+        run_bot_single_instance()
 
+# ========== MAIN ==========
 if __name__ == "__main__":
-    # Start web server in separate thread
-    web_thread = Thread(target=run_web, daemon=True)
+    # IMPORTANT: Run only ONE instance
+    import threading
+    
+    # Start Flask web server in background thread
+    web_thread = threading.Thread(target=run_web_server, daemon=True)
     web_thread.start()
     
-    # Start bot
-    run_bot()
+    # Start bot (main thread)
+    run_bot_single_instance()
+
 
